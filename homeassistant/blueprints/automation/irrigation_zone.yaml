@@ -1,0 +1,64 @@
+blueprint:
+  name: Irrigation Zone
+  description: >
+    Automatic irrigation for a single zone. Turns on the valve when soil
+    moisture drops below the threshold, waits the configured duration, then
+    turns it off. Skips watering if rain is detected or outside allowed hours.
+  domain: automation
+  input:
+    soil_sensor:
+      name: Soil Moisture Sensor
+      description: The sensor reporting soil moisture percentage for this zone.
+      selector:
+        entity:
+          device_class: moisture
+    valve_switch:
+      name: Valve Switch
+      description: The switch that controls the water valve for this zone.
+      selector:
+        entity:
+          domain: switch
+    moisture_threshold:
+      name: Moisture Threshold (%)
+      description: Trigger irrigation when moisture falls below this value.
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 90
+          unit_of_measurement: "%"
+    watering_duration:
+      name: Watering Duration (minutes)
+      description: How long to keep the valve open per irrigation cycle.
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 60
+          unit_of_measurement: min
+
+trigger:
+  - platform: numeric_state
+    entity_id: !input soil_sensor
+    below: !input moisture_threshold
+
+condition:
+  - condition: state
+    entity_id: input_boolean.rain_detected
+    state: "off"
+  - condition: time
+    after: "06:00:00"
+    before: "20:00:00"
+
+action:
+  - service: switch.turn_on
+    target:
+      entity_id: !input valve_switch
+  - delay:
+      minutes: !input watering_duration
+  - service: switch.turn_off
+    target:
+      entity_id: !input valve_switch
+
+mode: single
+max_exceeded: silent

@@ -1,0 +1,52 @@
+# Global automations — these never need changing when adding new zones.
+
+- id: rain_detection
+  alias: "Rain Detection"
+  description: "Set rain_detected flag when precipitation sensor fires (requires weather integration)"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.precipitation
+      above: 0.5
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.rain_detected
+  mode: single
+
+- id: rain_clear_daily
+  alias: "Rain Clear at Noon"
+  description: "Reset rain flag every day at 12:00 so irrigation can resume"
+  trigger:
+    - platform: time
+      at: "12:00:00"
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.rain_detected
+  mode: single
+
+- id: low_battery_any
+  alias: "Low Battery Alert"
+  description: "Notify when ANY paired battery sensor drops below 20% — works for all current and future devices"
+  trigger:
+    - platform: template
+      value_template: >
+        {{ states.sensor
+           | selectattr('attributes.device_class', 'eq', 'battery')
+           | selectattr('state', 'ne', 'unavailable')
+           | selectattr('state', 'ne', 'unknown')
+           | map(attribute='state') | map('float', 100) | min < 20 }}
+  action:
+    - service: persistent_notification.create
+      data:
+        title: "Low Battery Warning"
+        message: >
+          Low battery detected:
+          {% for s in states.sensor
+             | selectattr('attributes.device_class', 'eq', 'battery')
+             | selectattr('state', 'ne', 'unavailable')
+             if s.state | float(100) < 20 %}
+          - {{ s.name }}: {{ s.state }}%
+          {% endfor %}
+        notification_id: low_battery_alert
+  mode: single

@@ -1,0 +1,82 @@
+version: "3.8"
+
+services:
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:latest
+    container_name: zigbee2mqtt
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./zigbee2mqtt:/app/data
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    group_add:
+      - dialout
+    environment:
+      - TZ=${TZ:-Europe/Zagreb}
+      - MQTT_USER=${MQTT_USER}
+      - MQTT_PASSWORD=${MQTT_PASSWORD}
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    volumes:
+      - ./homeassistant:/config
+    environment:
+      - TZ=${TZ:-Europe/Zagreb}
+
+  puppet:
+    # Builds the balloob/puppet HA addon from source.
+    # The addon screenshots any HA Lovelace view on demand at port 10000.
+    # Reads config from /data/options.json — generated from env vars at startup.
+    build:
+      context: https://github.com/balloob/home-assistant-addons.git#main:puppet
+    container_name: puppet
+    restart: unless-stopped
+    network_mode: host
+    # Generate /data/options.json from environment variables, then start the server.
+    command: >
+      sh -c 'mkdir -p /data &&
+             printf "{\"access_token\":\"%s\",\"keep_browser_open\":true,\"home_assistant_url\":\"http://localhost:8123\"}"
+             "$$HA_TOKEN" > /data/options.json &&
+             node http.js'
+    environment:
+      - HA_TOKEN=${HA_TOKEN}
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    # Use envsubst to inject HA_TOKEN into the nginx config at startup.
+    command: >
+      sh -c "envsubst '$$HA_TOKEN' < /etc/nginx/templates/default.conf.template
+             > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./www:/usr/share/nginx/html:ro
+    environment:
+      - HA_TOKEN=${HA_TOKEN}
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
