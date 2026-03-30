@@ -1,3 +1,22 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# ALTERNATIVE: Docker Compose stack (non-HA-OS)
+#
+# This file is preserved as an alternative deployment method for users who
+# prefer Docker Compose on a generic Linux host rather than running
+# Home Assistant OS bare metal.
+#
+# The recommended approach for the Soyo M4 Air (or any dedicated x86 machine)
+# is HA OS bare metal — see README.md for the full setup guide.
+#
+# Usage (Docker Compose path):
+#   cp .env.example .env          # fill in HA_TOKEN, MQTT_USER, MQTT_PASSWORD, TZ
+#   source .env
+#   docker run --rm eclipse-mosquitto:2 \
+#     mosquitto_passwd -b /dev/stdout "$MQTT_USER" "$MQTT_PASSWORD" \
+#     > mosquitto/config/passwd
+#   docker compose -f docker-compose.alternative.yml up -d
+# ──────────────────────────────────────────────────────────────────────────────
+
 version: "3.8"
 
 services:

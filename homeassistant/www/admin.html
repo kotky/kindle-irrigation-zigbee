@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Irrigation Zone Manager</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f5f5f5;
+      color: #1a1a1a;
+      padding: 1.5rem;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      margin-bottom: 1.5rem;
+      border-bottom: 2px solid #1a1a1a;
+      padding-bottom: 0.5rem;
+    }
+
+    h2 { font-size: 1rem; margin-bottom: 0.75rem; color: #333; }
+
+    /* ── Token config bar ─────────────────────────────────────────── */
+
+    .token-bar {
+      background: #fff3e0;
+      border: 1px solid #ffcc80;
+      border-radius: 4px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .token-bar label { font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+    .token-bar input[type="text"],
+    .token-bar input[type="password"] {
+      flex: 1;
+      min-width: 200px;
+      padding: 0.4rem 0.6rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-family: monospace;
+    }
+    .token-bar input[type="text"]:focus,
+    .token-bar input[type="password"]:focus {
+      outline: 2px solid #ff9800;
+      border-color: transparent;
+    }
+    .token-bar .token-hint {
+      font-size: 0.75rem;
+      color: #888;
+      width: 100%;
+      margin-top: -0.25rem;
+    }
+    .token-saved { color: #388e3c; font-size: 0.8rem; font-weight: 600; }
+
+    /* ── LLM summary panel ────────────────────────────────────────── */
+
+    .llm-panel {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-left: 4px solid #673ab7;
+      border-radius: 4px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .llm-panel h2 { color: #673ab7; }
+    .llm-summary-text {
+      font-size: 0.9rem;
+      line-height: 1.6;
+      color: #333;
+      margin-top: 0.5rem;
+      min-height: 2.5rem;
+    }
+    .llm-summary-text.pending { color: #999; font-style: italic; }
+    .llm-meta {
+      font-size: 0.75rem;
+      color: #aaa;
+      margin-top: 0.4rem;
+    }
+
+    /* ── Zone list ────────────────────────────────────────────────── */
+
+    .zone-list { margin-bottom: 2rem; }
+
+    .zone-card {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-left: 4px solid #2196f3;
+      border-radius: 4px;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .zone-card.rain-blocked { border-left-color: #f44336; }
+
+    .zone-info strong { font-size: 1rem; }
+    .zone-info .meta { font-size: 0.8rem; color: #666; margin-top: 0.3rem; line-height: 1.6; }
+
+    .zone-moisture-bar {
+      height: 8px;
+      background: #e0e0e0;
+      border-radius: 4px;
+      margin-top: 0.5rem;
+      width: 200px;
+    }
+    .zone-moisture-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: #4caf50;
+      transition: width 0.3s;
+    }
+    .zone-moisture-bar-fill.low { background: #f44336; }
+
+    /* ── Buttons ──────────────────────────────────────────────────── */
+
+    .btn {
+      padding: 0.4rem 0.9rem;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .btn-danger  { background: #f44336; color: #fff; }
+    .btn-danger:hover  { background: #d32f2f; }
+    .btn-primary { background: #1a1a1a; color: #fff; }
+    .btn-primary:hover { background: #333; }
+    .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
+
+    /* ── Add form ─────────────────────────────────────────────────── */
+
+    .add-form {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 1.25rem;
+      max-width: 480px;
+    }
+
+    .field { margin-bottom: 0.85rem; }
+    .field label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 0.3rem;
+    }
+    .field input, .field select {
+      width: 100%;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    .field input:focus, .field select:focus {
+      outline: 2px solid #2196f3;
+      border-color: transparent;
+    }
+
+    /* ── Status bar ───────────────────────────────────────────────── */
+
+    .status-bar {
+      background: #e8f5e9;
+      border: 1px solid #a5d6a7;
+      border-radius: 4px;
+      padding: 0.5rem 0.75rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .status-bar.rain { background: #ffebee; border-color: #ef9a9a; }
+    .status-bar.error { background: #fff8e1; border-color: #ffe082; }
+    .status-bar .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #4caf50;
+      flex-shrink: 0;
+    }
+    .status-bar.rain  .dot  { background: #f44336; }
+    .status-bar.error .dot  { background: #ff9800; }
+
+    .error { color: #f44336; font-size: 0.85rem; margin-top: 0.5rem; }
+    .loading { color: #999; font-style: italic; font-size: 0.9rem; }
+
+    .valve-badge {
+      display: inline-block;
+      padding: 0.1rem 0.5rem;
+      border-radius: 3px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .valve-on  { background: #1a1a1a; color: #fff; }
+    .valve-off { background: #e0e0e0; color: #666; border: 1px solid #ccc; }
+
+    .auth-required {
+      text-align: center;
+      padding: 2rem;
+      color: #888;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Irrigation Zone Manager</h1>
+
+<!-- Token configuration -->
+<div class="token-bar">
+  <label for="ha-token">HA Token</label>
+  <input id="ha-token" type="password" placeholder="Paste your long-lived access token">
+  <button class="btn btn-primary btn-sm" onclick="saveToken()">Save</button>
+  <span id="token-saved" class="token-saved" style="display:none">&#10003; Saved</span>
+  <span class="token-hint">
+    HA → Profile (bottom-left) → Security → Long-Lived Access Tokens → Create Token.
+    Stored in browser localStorage only.
+  </span>
+</div>
+
+<!-- LLM irrigation summary -->
+<div class="llm-panel">
+  <h2>&#129302; Irrigation Summary</h2>
+  <div id="llm-summary" class="llm-summary-text pending">Loading summary…</div>
+  <div id="llm-meta" class="llm-meta"></div>
+</div>
+
+<div id="rain-status" class="status-bar loading">Loading system status…</div>
+
+<div class="zone-list">
+  <h2>Current Zones</h2>
+  <div id="zones-container"><p class="loading">Loading zones…</p></div>
+</div>
+
+<div class="add-form">
+  <h2>Add New Zone</h2>
+  <div class="field">
+    <label for="zone-name">Zone Name</label>
+    <input id="zone-name" type="text" placeholder="e.g. Garden Bed">
+  </div>
+  <div class="field">
+    <label for="zone-soil">Soil Moisture Sensor</label>
+    <select id="zone-soil"><option value="">Loading devices…</option></select>
+  </div>
+  <div class="field">
+    <label for="zone-valve">Valve Switch</label>
+    <select id="zone-valve"><option value="">Loading devices…</option></select>
+  </div>
+  <div class="field">
+    <label for="zone-threshold">Moisture Threshold (%)</label>
+    <input id="zone-threshold" type="number" value="30" min="10" max="90">
+  </div>
+  <button class="btn btn-primary" onclick="addZone()">Add Zone</button>
+  <div id="add-error" class="error" style="display:none"></div>
+</div>
+
+<script>
+  // ── Config ────────────────────────────────────────────────────────────
+
+  // Base URL of your Home Assistant instance.
+  // When this file is served from HA at /local/admin.html, an empty string
+  // means the same origin (http://homeassistant.local:8123), which is ideal.
+  // If you access this file from a different origin, set this explicitly, e.g.:
+  //   const HA_BASE = 'http://homeassistant.local:8123';
+  const HA_BASE = '';
+
+  // ── Token helpers ─────────────────────────────────────────────────────
+
+  function getToken() {
+    return localStorage.getItem('ha_token') || '';
+  }
+
+  function saveToken() {
+    const val = document.getElementById('ha-token').value.trim();
+    if (!val) return;
+    localStorage.setItem('ha_token', val);
+    document.getElementById('ha-token').value = '';
+    document.getElementById('ha-token').placeholder = 'Token saved — paste new token to update';
+    const saved = document.getElementById('token-saved');
+    saved.style.display = 'inline';
+    setTimeout(() => { saved.style.display = 'none'; }, 2500);
+    // Reload everything with the new token
+    init();
+  }
+
+  // On load: show placeholder if token already stored
+  (function () {
+    if (getToken()) {
+      document.getElementById('ha-token').placeholder = 'Token saved — paste new token to update';
+    }
+  })();
+
+  // ── Fetch helpers ─────────────────────────────────────────────────────
+
+  function authHeaders() {
+    const token = getToken();
+    if (!token) throw new Error('No HA token set. Paste your long-lived access token above and click Save.');
+    return {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json',
+    };
+  }
+
+  async function haGet(path) {
+    const r = await fetch(HA_BASE + '/api' + path, { headers: authHeaders() });
+    if (!r.ok) throw new Error(`HA API ${path} → ${r.status} ${r.statusText}`);
+    return r.json();
+  }
+
+  async function haPost(path, body) {
+    const r = await fetch(HA_BASE + '/api' + path, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: body === null ? undefined : JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`HA API POST ${path} → ${r.status} ${r.statusText}`);
+    return r.json();
+  }
+
+  async function haDelete(path) {
+    const r = await fetch(HA_BASE + '/api' + path, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    if (!r.ok && r.status !== 404) throw new Error(`HA API DELETE ${path} → ${r.status}`);
+  }
+
+  // ── LLM irrigation summary ────────────────────────────────────────────
+
+  async function loadSummary() {
+    const el = document.getElementById('llm-summary');
+    const meta = document.getElementById('llm-meta');
+    if (!getToken()) {
+      el.className = 'llm-summary-text pending';
+      el.textContent = 'Set your HA token above to load the summary.';
+      meta.textContent = '';
+      return;
+    }
+    try {
+      const state = await haGet('/states/input_text.irrigation_summary');
+      const text = state.state || '';
+      if (!text || text.startsWith('Summary pending')) {
+        el.className = 'llm-summary-text pending';
+        el.textContent = text || 'Summary not yet generated — runs on the hour.';
+      } else {
+        el.className = 'llm-summary-text';
+        el.textContent = text;
+      }
+      if (state.last_changed) {
+        const d = new Date(state.last_changed);
+        meta.textContent = 'Last updated: ' + d.toLocaleString();
+      }
+    } catch (e) {
+      el.className = 'llm-summary-text pending';
+      el.textContent = 'Could not load summary: ' + e.message;
+      meta.textContent = '';
+    }
+  }
+
+  // ── Load rain / system status ─────────────────────────────────────────
+
+  async function loadStatus() {
+    const bar = document.getElementById('rain-status');
+    if (!getToken()) {
+      bar.className = 'status-bar error';
+      bar.innerHTML = '<span class="dot"></span>Enter your HA token above to connect.';
+      return;
+    }
+    try {
+      const state = await haGet('/states/input_boolean.rain_detected');
+      const raining = state.state === 'on';
+      bar.className = 'status-bar' + (raining ? ' rain' : '');
+      bar.innerHTML = `<span class="dot"></span>${raining
+        ? 'Rain detected — irrigation is blocked until 12:00 reset'
+        : 'No rain — irrigation is active'}`;
+    } catch (e) {
+      bar.className = 'status-bar error';
+      bar.innerHTML = `<span class="dot"></span>Could not load system status: ${escHtml(e.message)}`;
+    }
+  }
+
+  // ── Load zones from input_text helpers ────────────────────────────────
+
+  async function loadZones() {
+    const container = document.getElementById('zones-container');
+    if (!getToken()) {
+      container.innerHTML = '<p class="auth-required">Enter your HA token above to view zones.</p>';
+      return;
+    }
+    try {
+      const states = await haGet('/states');
+
+      // Find all zone_N_name helpers to discover zone IDs
+      const nameHelpers = states.filter(s =>
+        /^input_text\.zone_\d+_name$/.test(s.entity_id)
+      ).sort((a, b) => {
+        const na = parseInt(a.entity_id.match(/zone_(\d+)_name/)[1]);
+        const nb = parseInt(b.entity_id.match(/zone_(\d+)_name/)[1]);
+        return na - nb;
+      });
+
+      if (nameHelpers.length === 0) {
+        container.innerHTML = '<p style="color:#999">No zones configured yet. Add one below.</p>';
+        return;
+      }
+
+      const stateMap = Object.fromEntries(states.map(s => [s.entity_id, s.state]));
+
+      const html = nameHelpers.map(helper => {
+        const id = helper.entity_id.match(/zone_(\d+)_name/)[1];
+        const name = helper.state || `Zone ${id}`;
+        const soil      = stateMap[`input_text.zone_${id}_soil`]      || '';
+        const valve     = stateMap[`input_text.zone_${id}_valve`]     || '';
+        const threshold = stateMap[`input_text.zone_${id}_threshold`] || '30';
+
+        const moisture   = soil  ? (parseFloat(stateMap[soil])  ?? null) : null;
+        const valveState = valve ? (stateMap[valve] || 'unknown').toUpperCase() : 'unknown';
+        const thresh     = parseFloat(threshold) || 30;
+
+        const moistureBar = moisture !== null
+          ? `<div class="zone-moisture-bar"><div class="zone-moisture-bar-fill${moisture < thresh ? ' low' : ''}" style="width:${Math.min(moisture, 100)}%"></div></div>`
+          : '';
+
+        return `<div class="zone-card">
+          <div class="zone-info">
+            <strong>${escHtml(name)}</strong>
+            <div class="meta">
+              Soil: ${escHtml(soil || '(not set)')}<br>
+              Valve: ${escHtml(valve || '(not set)')}
+              <span class="valve-badge valve-${valveState === 'ON' ? 'on' : 'off'}">${valveState}</span><br>
+              Moisture: ${moisture !== null ? moisture + '%' : '—'}
+              ${moistureBar}
+              Threshold: ${escHtml(threshold)}%
+            </div>
+          </div>
+          <button class="btn btn-danger" onclick="removeZone('${escHtml(id)}')">Remove</button>
+        </div>`;
+      }).join('');
+
+      container.innerHTML = html;
+    } catch (e) {
+      container.innerHTML = `<p class="error">Error loading zones: ${escHtml(e.message)}</p>`;
+    }
+  }
+
+  // ── Populate device dropdowns from HA entity registry ─────────────────
+
+  async function loadDeviceOptions() {
+    if (!getToken()) return;
+    try {
+      const states = await haGet('/states');
+
+      const soilSensors = states.filter(s =>
+        s.attributes?.device_class === 'moisture'
+      );
+      const valveSwitches = states.filter(s =>
+        s.entity_id.startsWith('switch.')
+      );
+
+      const soilSel  = document.getElementById('zone-soil');
+      const valveSel = document.getElementById('zone-valve');
+
+      soilSel.innerHTML = '<option value="">— Select soil sensor —</option>' +
+        soilSensors.map(s =>
+          `<option value="${escHtml(s.entity_id)}">${escHtml(s.attributes.friendly_name || s.entity_id)} (${escHtml(s.state)}%)</option>`
+        ).join('');
+
+      valveSel.innerHTML = '<option value="">— Select valve switch —</option>' +
+        valveSwitches.map(s =>
+          `<option value="${escHtml(s.entity_id)}">${escHtml(s.attributes.friendly_name || s.entity_id)} (${escHtml(s.state)})</option>`
+        ).join('');
+
+      if (soilSensors.length === 0)
+        soilSel.innerHTML = '<option value="">No moisture sensors found — pair devices first</option>';
+      if (valveSwitches.length === 0)
+        valveSel.innerHTML = '<option value="">No switches found — pair devices first</option>';
+    } catch (e) {
+      console.error('Failed to load devices:', e);
+    }
+  }
+
+  // ── Add zone ──────────────────────────────────────────────────────────
+
+  async function addZone() {
+    const errEl = document.getElementById('add-error');
+    errEl.style.display = 'none';
+
+    if (!getToken()) return showError('Set your HA token first.');
+
+    const name      = document.getElementById('zone-name').value.trim();
+    const soil      = document.getElementById('zone-soil').value;
+    const valve     = document.getElementById('zone-valve').value;
+    const threshold = document.getElementById('zone-threshold').value;
+
+    if (!name)      return showError('Zone name is required.');
+    if (!soil)      return showError('Please select a soil moisture sensor.');
+    if (!valve)     return showError('Please select a valve switch.');
+    if (!threshold) return showError('Please enter a moisture threshold.');
+
+    // Find next available zone ID
+    let states;
+    try { states = await haGet('/states'); } catch (e) { return showError('Failed to connect to HA: ' + e.message); }
+
+    const existing = states
+      .filter(s => /^input_text\.zone_\d+_name$/.test(s.entity_id))
+      .map(s => parseInt(s.entity_id.match(/zone_(\d+)_name/)[1]))
+      .sort((a, b) => a - b);
+
+    let zoneId = 1;
+    while (existing.includes(zoneId)) zoneId++;
+
+    // Create the four input_text helpers via HA config API
+    const helpers = [
+      { entity: `input_text.zone_${zoneId}_name`,      value: name },
+      { entity: `input_text.zone_${zoneId}_soil`,      value: soil },
+      { entity: `input_text.zone_${zoneId}_valve`,     value: valve },
+      { entity: `input_text.zone_${zoneId}_threshold`, value: String(threshold) },
+    ];
+
+    try {
+      for (const h of helpers) {
+        const key = h.entity.replace('input_text.', '');
+        // Register the helper via the storage collection API
+        await haPost('/config/input_text/config/' + key, {
+          name: key.replace(/_/g, ' '),
+          max: 255,
+        });
+        // Set its initial value
+        await haPost('/services/input_text/set_value', {
+          entity_id: h.entity,
+          value: h.value,
+        });
+      }
+    } catch (e) {
+      return showError('Failed to create zone helpers: ' + e.message);
+    }
+
+    // Create the irrigation automation from the blueprint
+    try {
+      await haPost('/config/automation/config/irrigation_zone_' + zoneId, {
+        alias: `Irrigation Zone ${zoneId} – ${name}`,
+        use_blueprint: {
+          path: 'irrigation_zone.yaml',
+          input: {
+            soil_sensor:        soil,
+            valve_switch:       valve,
+            moisture_threshold: parseInt(threshold),
+            watering_duration:  10,
+          },
+        },
+      });
+    } catch (e) {
+      // Non-fatal: user can add manually in HA → Settings → Automations
+      console.warn('Auto-create automation failed (create manually from irrigation_zone blueprint):', e.message);
+    }
+
+    // Reset form
+    document.getElementById('zone-name').value      = '';
+    document.getElementById('zone-soil').value      = '';
+    document.getElementById('zone-valve').value     = '';
+    document.getElementById('zone-threshold').value = '30';
+
+    await Promise.all([loadZones(), loadDeviceOptions()]);
+  }
+
+  // ── Remove zone ───────────────────────────────────────────────────────
+
+  async function removeZone(id) {
+    if (!confirm(`Remove zone ${id}? This deletes the zone config helpers.\nThe HA automation must be deleted separately in HA → Settings → Automations.`)) return;
+
+    const keys = ['name', 'soil', 'valve', 'threshold'].map(k => `zone_${id}_${k}`);
+
+    try {
+      for (const key of keys) {
+        await haDelete('/config/input_text/config/' + key);
+      }
+    } catch (e) {
+      alert('Error removing zone: ' + e.message);
+      return;
+    }
+
+    await loadZones();
+  }
+
+  // ── Utilities ─────────────────────────────────────────────────────────
+
+  function showError(msg) {
+    const el = document.getElementById('add-error');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────
+
+  async function init() {
+    await Promise.all([loadSummary(), loadStatus(), loadZones(), loadDeviceOptions()]);
+    // Refresh every 30 s
+    setInterval(() => Promise.all([loadSummary(), loadStatus(), loadZones()]), 30_000);
+  }
+
+  init();
+</script>
+</body>
+</html>
