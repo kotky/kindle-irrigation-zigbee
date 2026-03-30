@@ -5,26 +5,38 @@ Autonomous irrigation system using Zigbee soil sensors and water valves, with a 
 ## Architecture
 
 ```
-Soyo M4 Air — HA OS generic-x86-64 (bare metal)
-├── Addon: Mosquitto Broker     ← local only (no public port needed with NetBird)
-├── Addon: Zigbee2MQTT          ← USB passthrough /dev/ttyUSB0
-├── Addon: puppet               ← balloob, port 10000, Kindle screenshots
-├── Addon: Ollama               ← SirUli/homeassistant-ollama-addon, qwen2.5:1.5b
-└── Addon: NetBird              ← netbirdio/addon-netbird, self-hosted management
+Soyo M4 Air — Proxmox VE (bare metal, Intel N95)
+│
+├── VM 100: HA OS (4 GB RAM, 64 GB SSD, USB Zigbee dongle passed through)
+│   ├── Addon: Mosquitto Broker     ← local only (no public port needed with NetBird)
+│   ├── Addon: Zigbee2MQTT          ← Zigbee USB dongle via Proxmox USB passthrough
+│   ├── Addon: puppet               ← balloob, port 10000, Kindle screenshots
+│   ├── Addon: Ollama               ← qwen2.5:1.5b, hourly irrigation summary
+│   └── Addon: NetBird              ← netbirdio/addon-netbird, self-hosted management
+│
+└── (optional future VMs / LXCs)
+    ├── Frigate NVR                 ← Intel iGPU VA-API object detection
+    └── misc services
 
 HA Config (this repo → homeassistant/):
 ├── configuration.yaml          ← MQTT, input helpers, Ollama rest_command
 ├── automations.yaml            ← moisture irrigation, rain block, battery alerts, LLM summary
 ├── blueprints/automation/      ← irrigation_zone.yaml (one instance per zone)
-├── zigbee2mqtt/                ← Zigbee2MQTT addon config
-│   └── configuration.yaml
+├── zigbee2mqtt/
+│   └── configuration.yaml      ← Zigbee2MQTT addon config
 └── www/admin.html              ← Zone management UI (served at /local/admin.html)
 
 Kindle: wget port 10000 → eips (every 90 s)
 ```
 
-**Removed vs the docker-compose version:**
-- `docker-compose.yml` → archived as `docker-compose.alternative.yml` with a note
+**Why Proxmox instead of bare metal HA OS:**
+- Proxmox snapshots = instant HA backups before risky config changes
+- Leaves room for future VMs/LXCs (Frigate, NAS, etc.) on the same box
+- HA OS VM is fully supported and behaves identically to bare metal
+- USB dongle passthrough to a VM is rock-solid via Proxmox host configuration
+
+**What was removed vs the docker-compose version:**
+- `docker-compose.yml` → archived as `docker-compose.alternative.yml`
 - `mosquitto/` → handled by the Mosquitto addon
 - `nginx/` → not needed; HA OS serves `/config/www/` at `/local/`
 - `zigbee2mqtt/` (root) → config lives at `homeassistant/zigbee2mqtt/`
@@ -32,7 +44,7 @@ Kindle: wget port 10000 → eips (every 90 s)
 ## Devices
 
 | Item | AliExpress ID | Z2M Model |
-|------|--------------|-----------
+|------|--------------|-----------|
 | Soil moisture sensor | 1005011801061136 | Tuya TS0601_soil |
 | Water valve | 1005009336429185 | Tuya TS0601_water_valve |
 
@@ -44,63 +56,102 @@ Kindle: wget port 10000 → eips (every 90 s)
 |---|---|
 | CPU | Intel N95 (4× E-core, 3.4 GHz boost, 15 W TDP) |
 | RAM | 16 GB DDR4/DDR5 |
-| iGPU | Intel UHD (16 EU) |
+| iGPU | Intel UHD (16 EU, VA-API, OpenCL 3.0) |
 | Ollama model | `qwen2.5:1.5b` — 8–20 tok/s, ~2.5 GB RAM, 200-token summary in ~10–25 s |
 
-The LLM summary runs once per hour in the background (~20 s of ~80% CPU, then fully idle).
+The LLM summary runs once per hour in the background (~20 s at ~80% CPU, then fully idle).
 
 ---
 
-## Quick Start — HA OS Bare Metal
+## Quick Start — Proxmox + HA OS VM
 
-### 1. Flash HA OS to the SSD
+### 1. Install Proxmox VE
 
-1. Download **`haos_generic-x86-64.img.xz`** from the [HA releases page](https://github.com/home-assistant/operating-system/releases) (pick the latest stable)
-2. Flash to the internal SSD using **Balena Etcher** (from another machine with USB-to-SSD adapter), or:
-   ```bash
-   xz -dc haos_generic-x86-64.img.xz | sudo dd of=/dev/sdX bs=4M status=progress
-   ```
-3. Insert SSD, boot the Soyo M4 Air, wait ~3 minutes for first boot
+1. Download the **Proxmox VE ISO** from [proxmox.com/downloads](https://www.proxmox.com/en/downloads)
+2. Flash to a USB stick: `dd if=proxmox-ve_*.iso of=/dev/sdX bs=4M status=progress`
+3. Boot the Soyo M4 Air from the USB, complete the installer
+   - Target disk: your 512 GB SSD
+   - Set a static IP or note the DHCP address shown at the end
+4. Open the Proxmox web UI at `https://PROXMOX_IP:8006` (accept the self-signed cert)
 
-### 2. Complete onboarding
+> **Tip:** After first login, dismiss the "no valid subscription" nag with
+> `sed -i 's/data.status !== .Active./false/' /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js`
+> then refresh the browser.
 
-Open `http://homeassistant.local:8123` → create your Home Assistant account.
+### 2. Create the HA OS VM (one command)
 
-### 3. Add community addon repositories
+SSH into the Proxmox host and run the community helper script:
 
-HA → Settings → Add-ons → Add-on Store → three-dot menu → **Repositories** → add each URL:
+```bash
+bash -c "$(wget -qLO - https://github.com/tteck/Proxmox/raw/main/vm/haos-vm.sh)"
+```
+
+Accept the defaults (or customise RAM/disk when prompted). The script:
+- Downloads the latest `haos_generic-x86-64.qcow2`
+- Creates VM 100 with UEFI boot, VirtIO disk, and the image pre-loaded
+- Starts the VM automatically
+
+> Manual alternative: download `haos_generic-x86-64.qcow2.xz` from the
+> [HA releases page](https://github.com/home-assistant/operating-system/releases),
+> import it, and configure the VM yourself (UEFI, q35 machine type, VirtIO SCSI).
+
+### 3. Pass the Zigbee USB dongle through to the VM
+
+Plug in the Zigbee USB coordinator (e.g. SONOFF Zigbee 3.0 USB Dongle), then on the Proxmox host:
+
+```bash
+# Find the dongle's vendor:product ID
+lsusb
+# e.g. "Bus 001 Device 003: ID 10c4:ea60 Silicon Labs CP210x UART Bridge"
+
+# Pass it to VM 100 (replace vendorid/productid)
+qm set 100 --usb0 host=10c4:ea60
+```
+
+Or via the web UI: **VM 100 → Hardware → Add → USB Device** → select the dongle by vendor/device ID.
+
+The dongle will appear inside the HA OS VM as `/dev/ttyUSB0` — no driver installation needed.
+
+### 4. Complete HA onboarding
+
+Wait ~3 minutes for first boot, then open `http://homeassistant.local:8123` and create your Home Assistant account.
+
+> If `homeassistant.local` doesn't resolve, use the IP shown in the Proxmox VM console
+> (VM 100 → Console).
+
+### 5. Add community addon repositories
+
+HA → Settings → Add-ons → Add-on Store → ⋮ menu → **Repositories** → add:
 
 | Addon | Repository URL |
 |---|---|
-| Ollama | `https://github.com/alexbelgium/hassio-addons` *(or SirUli's repo)* |
+| Ollama | `https://github.com/alexbelgium/hassio-addons` |
 | NetBird | `https://github.com/netbirdio/addon-netbird` |
 
-> The **Mosquitto**, **Zigbee2MQTT**, and **File editor** addons are available in the default store.
+> **Mosquitto**, **Zigbee2MQTT**, and **File editor** are in the default store.
 
-### 4. Install addons
+### 6. Install and configure addons
 
-Install and start each addon in order:
+Install and start each in order:
 
-| Addon | Key config (set via addon UI) |
+| Addon | Key config |
 |---|---|
-| **Mosquitto Broker** | Create user `homeassistant` and user `zigbee2mqtt` in the *Logins* section with strong passwords |
-| **Zigbee2MQTT** | Points to `/config/zigbee2mqtt/configuration.yaml` automatically |
-| **puppet** | `access_token`: long-lived HA token (created in step 5); `home_assistant_url`: `http://localhost:8123`; `keep_browser_open`: true |
-| **Ollama** | Default settings; pull model after install (see step 7) |
-| **NetBird** | `admin_url`: your self-hosted management URL; `management_url`: your management API URL; `setup_key`: from your NetBird dashboard |
+| **Mosquitto Broker** | Create users `homeassistant` and `zigbee2mqtt` in the *Logins* section with strong passwords |
+| **Zigbee2MQTT** | Auto-reads `/config/zigbee2mqtt/configuration.yaml` — no extra config needed |
+| **puppet** | `access_token`: long-lived token (step 8); `home_assistant_url`: `http://localhost:8123`; `keep_browser_open`: true |
+| **Ollama** | Default settings; pull model after install (step 10) |
+| **NetBird** | `admin_url`: your self-hosted management URL; `management_url`: your API URL; `setup_key`: from NetBird dashboard |
 
-### 5. Copy this repo's config into HA
-
-Using the **File editor** addon (or SSH addon):
+### 7. Copy this repo's config into HA
 
 ```bash
-# From a machine on the same LAN — scp into HA OS
+# From a machine on the same LAN
 scp -r homeassistant/* root@homeassistant.local:/config/
 ```
 
-Or use the HA File Editor to upload/paste files one by one.
+Or use the **File editor** addon to upload/paste files individually.
 
-### 6. Edit secrets
+### 8. Edit secrets
 
 Open `/config/secrets.yaml` and fill in real passwords:
 
@@ -110,32 +161,30 @@ mqtt_password: "YOUR_STRONG_MQTT_PASSWORD"   # must match Mosquitto addon Logins
 z2m_mqtt_password: "YOUR_Z2M_MQTT_PASSWORD"  # must match zigbee2mqtt user in Mosquitto
 ```
 
-### 7. Generate a long-lived HA token
+### 9. Generate a long-lived HA token
 
 HA → Profile (bottom-left avatar) → Security → Long-Lived Access Tokens → **Create Token** → copy it.
 
-You will need this token for:
+You'll need this token for:
 - The **puppet** addon config (`access_token`)
-- The admin UI at `/local/admin.html` (paste it once in the browser — stored in localStorage)
+- The admin UI at `/local/admin.html` (paste once in the browser — stored in localStorage)
 
-### 8. Restart Home Assistant
+### 10. Restart Home Assistant
 
 HA → Settings → System → **Restart** → Restart Home Assistant.
 
 After restart: all automations load, Zigbee2MQTT connects, Ollama starts.
 
-### 9. Pull the Ollama model
-
-In the Ollama addon UI (or via API):
+### 11. Pull the Ollama model
 
 ```bash
 curl http://homeassistant.local:11434/api/pull \
   -d '{"name":"qwen2.5:1.5b"}'
 ```
 
-Wait for the ~1 GB download to complete. The first hourly summary will run at the next top of the hour.
+Wait for the ~1 GB download. The first hourly summary runs at the next top of the hour.
 
-### 10. Pair Zigbee devices
+### 12. Pair Zigbee devices
 
 Open `http://homeassistant.local:8080` (Zigbee2MQTT UI):
 1. Click **Permit join**
@@ -144,7 +193,7 @@ Open `http://homeassistant.local:8080` (Zigbee2MQTT UI):
 4. Turn **Permit join off** when done
 5. Set `permit_join: false` in `/config/zigbee2mqtt/configuration.yaml` → restart the Z2M addon
 
-### 11. Assign zones
+### 13. Assign zones
 
 Open `http://homeassistant.local:8123/local/admin.html`:
 1. Paste your long-lived token and click **Save**
@@ -154,18 +203,17 @@ Open `http://homeassistant.local:8123/local/admin.html`:
 
 Repeat for each irrigation zone.
 
-### 12. Create the Kindle dashboard in HA
+### 14. Create the Kindle dashboard in HA
 
 HA → Settings → Dashboards → **Add Dashboard**:
 - Name: `Kindle`
 - URL path: `kindle`
 
-Add cards for each zone's entities (soil moisture gauge, valve switch, battery level, rain boolean).
-Use a high-contrast theme for best e-ink readability.
+Add cards for each zone's entities (soil moisture gauge, valve switch, battery level, rain boolean). Use a high-contrast theme for best e-ink readability.
 
-### 13. Set up Kindle
+### 15. Set up Kindle
 
-Edit `kindle/update.sh` and set `SERVER_IP` to your HA host's LAN IP, then:
+Edit `kindle/update.sh` and set `SERVER_IP` to your HA VM's LAN IP, then:
 
 ```bash
 # Replace 192.168.1.XXX with your Kindle's IP (Settings → Device Info → WiFi)
@@ -203,28 +251,62 @@ No service restarts required.
 
 | Service | Port | Notes |
 |---|---|---|
+| Proxmox web UI | 8006 | Hypervisor management (HTTPS) |
 | Home Assistant | 8123 | Main UI + REST API |
 | Zigbee2MQTT | 8080 | Device pairing + MQTT debug |
-| Mosquitto | 1883 | MQTT broker — local only (NetBird provides remote access) |
+| Mosquitto | 1883 | MQTT broker — VM-local only (NetBird for remote access) |
 | puppet | 10000 | On-demand HA dashboard screenshots for Kindle |
-| Ollama | 11434 | LLM inference (local only) |
+| Ollama | 11434 | LLM inference (VM-local only) |
+
+---
+
+## Proxmox Tips
+
+### Snapshots (before risky changes)
+
+```bash
+# On the Proxmox host — snapshot VM 100 before a major HA update
+qm snapshot 100 pre-ha-update --description "Before HA $(date +%Y-%m-%d) update"
+
+# Roll back if something breaks
+qm rollback 100 pre-ha-update
+```
+
+Or use the web UI: **VM 100 → Snapshots → Take Snapshot**.
+
+### Recommended VM resource allocation
+
+| Resource | Value | Notes |
+|---|---|---|
+| RAM | 4 GB | Enough for HA + Ollama `qwen2.5:1.5b` (~2.5 GB) + addons |
+| vCPUs | 3 | Leave 1 core for Proxmox host |
+| Disk | 64 GB | HA OS default is 32 GB; 64 GB gives room for history + backups |
+| Machine type | q35 | Required for UEFI; default from tteck script |
+
+### Future expansion on the same host
+
+```
+Proxmox VE (bare metal)
+├── VM 100: HA OS          (4 GB RAM)
+├── LXC 101: Frigate NVR   (2 GB RAM + Intel iGPU VA-API passthrough)
+└── LXC 102: misc services (512 MB RAM)
+```
+
+The N95's Intel UHD iGPU can be shared between the host and LXCs via GVT-d or VA-API device passthrough — useful for Frigate object detection without impacting HA.
 
 ---
 
 ## NetBird
 
-With the NetBird addon running on HA OS, all your NetBird peers can reach the host on its NetBird IP — including Mosquitto (port 1883) and the HA UI (port 8123) — without any public port forwards. No TLS cert is needed for MQTT because the WireGuard tunnel encrypts traffic end-to-end.
+With the NetBird addon running inside the HA VM, all your NetBird peers can reach the VM on its NetBird IP — including Mosquitto (1883) and the HA UI (8123) — without any public port forwards or router NAT rules. WireGuard encrypts the traffic end-to-end so no TLS cert is needed for MQTT.
 
-To connect remote soil sensors or external clients, install the NetBird client on those devices and join the same NetBird network.
+Remote soil sensors or clients connect by installing the NetBird client and joining the same network.
 
 ---
 
 ## Verification
 
 ```bash
-# Check Zigbee2MQTT is receiving device data
-# (use MQTT Explorer or the Z2M UI at port 8080)
-
 # Test puppet screenshot
 curl "http://homeassistant.local:10000/?url=/lovelace/kindle&viewport=600x800" -o test.png
 file test.png   # PNG image data, 600 x 800
@@ -233,17 +315,16 @@ file test.png   # PNG image data, 600 x 800
 curl -H "Authorization: Bearer YOUR_TOKEN" \
   http://homeassistant.local:8123/api/states/input_boolean.rain_detected
 
-# Simulate low soil moisture to trigger irrigation automation
-# (use MQTT Explorer or Z2M virtual device feature)
-
 # Trigger LLM summary manually
-# HA → Developer Tools → Actions → automation.trigger
-# Action: irrigation_llm_summary
-# Then check: Developer Tools → States → input_text.irrigation_summary
+# HA → Developer Tools → Actions → automation.trigger → irrigation_llm_summary
+# Then: Developer Tools → States → input_text.irrigation_summary
+
+# Proxmox: verify VM is running
+qm status 100
 ```
 
 ---
 
 ## Alternative: Docker Compose
 
-If you want to run this stack without HA OS (e.g. on a generic Ubuntu server), see [`docker-compose.alternative.yml`](docker-compose.alternative.yml) for the full docker-compose configuration.
+If you want to run this stack without Proxmox/HA OS (e.g. on a generic Ubuntu server), see [`docker-compose.alternative.yml`](docker-compose.alternative.yml).
