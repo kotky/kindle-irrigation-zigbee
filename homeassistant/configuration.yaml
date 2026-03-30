@@ -1,0 +1,35 @@
+default_config:
+
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 172.16.0.0/12
+
+mqtt:
+  broker: localhost
+  port: 1883
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+
+input_boolean:
+  rain_detected:
+    name: "Rain Detected"
+    icon: mdi:weather-rainy
+
+# Zone config helpers — pre-seeded with zone 1.
+# Additional zones are created via the admin UI (http://host/admin).
+input_text:
+  zone_1_name:
+    name: "Zone 1 Name"
+    initial: "Zone 1"
+  zone_1_soil:
+    name: "Zone 1 Soil Entity"
+    initial: ""
+  zone_1_valve:
+    name: "Zone 1 Valve Entity"
+    initial: ""
+  zone_1_threshold:
+    name: "Zone 1 Moisture Threshold"
+    initial: "30"
+
+automation: !include automations.yaml

@@ -1,0 +1,9 @@
+homeassistant/secrets.yaml
+.env
+mosquitto/config/passwd
+zigbee2mqtt/database.db
+zigbee2mqtt/coordinator_backup.json
+zigbee2mqtt/state.json
+mosquitto/data/
+mosquitto/log/
+www/dashboard.png

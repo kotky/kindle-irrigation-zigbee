@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Irrigation Zone Manager</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f5f5f5;
+      color: #1a1a1a;
+      padding: 1.5rem;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      margin-bottom: 1.5rem;
+      border-bottom: 2px solid #1a1a1a;
+      padding-bottom: 0.5rem;
+    }
+
+    h2 { font-size: 1rem; margin-bottom: 0.75rem; color: #333; }
+
+    .zone-list { margin-bottom: 2rem; }
+
+    .zone-card {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-left: 4px solid #2196f3;
+      border-radius: 4px;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .zone-card.rain-blocked { border-left-color: #f44336; }
+
+    .zone-info strong { font-size: 1rem; }
+    .zone-info .meta { font-size: 0.8rem; color: #666; margin-top: 0.3rem; line-height: 1.6; }
+
+    .zone-moisture-bar {
+      height: 8px;
+      background: #e0e0e0;
+      border-radius: 4px;
+      margin-top: 0.5rem;
+      width: 200px;
+    }
+    .zone-moisture-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: #4caf50;
+      transition: width 0.3s;
+    }
+    .zone-moisture-bar-fill.low { background: #f44336; }
+
+    .btn {
+      padding: 0.4rem 0.9rem;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .btn-danger { background: #f44336; color: #fff; }
+    .btn-danger:hover { background: #d32f2f; }
+    .btn-primary { background: #1a1a1a; color: #fff; }
+    .btn-primary:hover { background: #333; }
+
+    .add-form {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 1.25rem;
+      max-width: 480px;
+    }
+
+    .field {
+      margin-bottom: 0.85rem;
+    }
+    .field label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 0.3rem;
+    }
+    .field input, .field select {
+      width: 100%;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    .field input:focus, .field select:focus {
+      outline: 2px solid #2196f3;
+      border-color: transparent;
+    }
+
+    .status-bar {
+      background: #e8f5e9;
+      border: 1px solid #a5d6a7;
+      border-radius: 4px;
+      padding: 0.5rem 0.75rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .status-bar.rain { background: #ffebee; border-color: #ef9a9a; }
+    .status-bar .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #4caf50;
+      flex-shrink: 0;
+    }
+    .status-bar.rain .dot { background: #f44336; }
+
+    .error { color: #f44336; font-size: 0.85rem; margin-top: 0.5rem; }
+    .loading { color: #999; font-style: italic; font-size: 0.9rem; }
+
+    .valve-badge {
+      display: inline-block;
+      padding: 0.1rem 0.5rem;
+      border-radius: 3px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .valve-on { background: #1a1a1a; color: #fff; }
+    .valve-off { background: #e0e0e0; color: #666; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+
+<h1>Irrigation Zone Manager</h1>
+
+<div id="rain-status" class="status-bar loading">Loading system status…</div>
+
+<div class="zone-list">
+  <h2>Current Zones</h2>
+  <div id="zones-container"><p class="loading">Loading zones…</p></div>
+</div>
+
+<div class="add-form">
+  <h2>Add New Zone</h2>
+  <div class="field">
+    <label for="zone-name">Zone Name</label>
+    <input id="zone-name" type="text" placeholder="e.g. Garden Bed">
+  </div>
+  <div class="field">
+    <label for="zone-soil">Soil Moisture Sensor</label>
+    <select id="zone-soil"><option value="">Loading devices…</option></select>
+  </div>
+  <div class="field">
+    <label for="zone-valve">Valve Switch</label>
+    <select id="zone-valve"><option value="">Loading devices…</option></select>
+  </div>
+  <div class="field">
+    <label for="zone-threshold">Moisture Threshold (%)</label>
+    <input id="zone-threshold" type="number" value="30" min="10" max="90">
+  </div>
+  <button class="btn btn-primary" onclick="addZone()">Add Zone</button>
+  <div id="add-error" class="error" style="display:none"></div>
+</div>
+
+<script>
+  const API = '/ha-api';
+
+  // ── Helpers ──────────────────────────────────────────────────────────
+
+  async function haGet(path) {
+    const r = await fetch(API + path);
+    if (!r.ok) throw new Error(`HA API ${path} → ${r.status}`);
+    return r.json();
+  }
+
+  async function haPost(path, body) {
+    const r = await fetch(API + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(`HA API POST ${path} → ${r.status}`);
+    return r.json();
+  }
+
+  // ── Load rain / system status ─────────────────────────────────────────
+
+  async function loadStatus() {
+    const bar = document.getElementById('rain-status');
+    try {
+      const state = await haGet('/states/input_boolean.rain_detected');
+      const raining = state.state === 'on';
+      bar.className = 'status-bar' + (raining ? ' rain' : '');
+      bar.innerHTML = `<span class="dot"></span>${raining
+        ? 'Rain detected — irrigation is blocked until 12:00 reset'
+        : 'No rain — irrigation is active'}`;
+    } catch (e) {
+      bar.textContent = 'Could not load system status: ' + e.message;
+    }
+  }
+
+  // ── Load zones from input_text helpers ────────────────────────────────
+
+  async function loadZones() {
+    const container = document.getElementById('zones-container');
+    try {
+      const states = await haGet('/states');
+
+      // Find all zone_N_name helpers to discover zone IDs
+      const nameHelpers = states.filter(s =>
+        s.entity_id.startsWith('input_text.zone_') &&
+        s.entity_id.endsWith('_name')
+      );
+
+      if (nameHelpers.length === 0) {
+        container.innerHTML = '<p style="color:#999">No zones configured yet. Add one below.</p>';
+        return;
+      }
+
+      const stateMap = Object.fromEntries(states.map(s => [s.entity_id, s.state]));
+
+      const html = nameHelpers.map(helper => {
+        const id = helper.entity_id.match(/input_text\.zone_(\d+)_name/)[1];
+        const name = helper.state || `Zone ${id}`;
+        const soil = stateMap[`input_text.zone_${id}_soil`] || '';
+        const valve = stateMap[`input_text.zone_${id}_valve`] || '';
+        const threshold = stateMap[`input_text.zone_${id}_threshold`] || '30';
+
+        const moisture = soil ? (parseFloat(stateMap[soil]) || 0) : null;
+        const valveState = valve ? (stateMap[valve] || 'unknown').toUpperCase() : 'unknown';
+
+        const moistureBar = moisture !== null
+          ? `<div class="zone-moisture-bar"><div class="zone-moisture-bar-fill${moisture < 30 ? ' low' : ''}" style="width:${moisture}%"></div></div>`
+          : '';
+
+        return `<div class="zone-card">
+          <div class="zone-info">
+            <strong>${escHtml(name)}</strong>
+            <div class="meta">
+              Soil: ${escHtml(soil || '(not set)')}<br>
+              Valve: ${escHtml(valve || '(not set)')}
+              <span class="valve-badge valve-${valveState === 'ON' ? 'on' : 'off'}">${valveState}</span><br>
+              Moisture: ${moisture !== null ? moisture + '%' : '—'}
+              ${moistureBar}
+              Threshold: ${escHtml(threshold)}%
+            </div>
+          </div>
+          <button class="btn btn-danger" onclick="removeZone('${id}')">Remove</button>
+        </div>`;
+      }).join('');
+
+      container.innerHTML = html;
+    } catch (e) {
+      container.innerHTML = `<p class="error">Error loading zones: ${e.message}</p>`;
+    }
+  }
+
+  // ── Populate device dropdowns from HA entity registry ─────────────────
+
+  async function loadDeviceOptions() {
+    try {
+      const states = await haGet('/states');
+
+      const soilSensors = states.filter(s =>
+        s.attributes?.device_class === 'moisture'
+      );
+      const valveSwitches = states.filter(s =>
+        s.entity_id.startsWith('switch.')
+      );
+
+      const soilSel = document.getElementById('zone-soil');
+      const valveSel = document.getElementById('zone-valve');
+
+      soilSel.innerHTML = '<option value="">— Select soil sensor —</option>' +
+        soilSensors.map(s =>
+          `<option value="${s.entity_id}">${s.attributes.friendly_name || s.entity_id} (${s.state}%)</option>`
+        ).join('');
+
+      valveSel.innerHTML = '<option value="">— Select valve switch —</option>' +
+        valveSwitches.map(s =>
+          `<option value="${s.entity_id}">${s.attributes.friendly_name || s.entity_id} (${s.state})</option>`
+        ).join('');
+
+      if (soilSensors.length === 0) soilSel.innerHTML = '<option value="">No moisture sensors found — pair devices first</option>';
+      if (valveSwitches.length === 0) valveSel.innerHTML = '<option value="">No switches found — pair devices first</option>';
+    } catch (e) {
+      console.error('Failed to load devices:', e);
+    }
+  }
+
+  // ── Add zone ──────────────────────────────────────────────────────────
+
+  async function addZone() {
+    const errEl = document.getElementById('add-error');
+    errEl.style.display = 'none';
+
+    const name      = document.getElementById('zone-name').value.trim();
+    const soil      = document.getElementById('zone-soil').value;
+    const valve     = document.getElementById('zone-valve').value;
+    const threshold = document.getElementById('zone-threshold').value;
+
+    if (!name)      return showError('Zone name is required.');
+    if (!soil)      return showError('Please select a soil moisture sensor.');
+    if (!valve)     return showError('Please select a valve switch.');
+    if (!threshold) return showError('Please enter a moisture threshold.');
+
+    // Find next available zone ID
+    let states;
+    try { states = await haGet('/states'); } catch (e) { return showError('Failed to connect to HA: ' + e.message); }
+
+    const existing = states
+      .filter(s => s.entity_id.match(/^input_text\.zone_(\d+)_name$/))
+      .map(s => parseInt(s.entity_id.match(/zone_(\d+)_name/)[1]))
+      .sort((a, b) => a - b);
+
+    let zoneId = 1;
+    while (existing.includes(zoneId)) zoneId++;
+
+    // Create the four input_text helpers via HA service call
+    const helpers = [
+      { entity: `input_text.zone_${zoneId}_name`,      value: name },
+      { entity: `input_text.zone_${zoneId}_soil`,      value: soil },
+      { entity: `input_text.zone_${zoneId}_valve`,     value: valve },
+      { entity: `input_text.zone_${zoneId}_threshold`, value: String(threshold) },
+    ];
+
+    try {
+      for (const h of helpers) {
+        // input_text helpers must be registered first — use HA config API
+        await haPost('/config/input_text/config/' + h.entity.replace('input_text.', ''), {
+          name: h.entity.replace('input_text.', '').replace(/_/g, ' '),
+        });
+        // Set the value
+        await haPost('/services/input_text/set_value', {
+          entity_id: h.entity,
+          value: h.value,
+        });
+      }
+    } catch (e) {
+      return showError('Failed to create zone helpers: ' + e.message);
+    }
+
+    // Create irrigation automation from blueprint
+    try {
+      await haPost('/config/automation/config/' + `irrigation_zone_${zoneId}`, {
+        alias: `Irrigation Zone ${zoneId} - ${name}`,
+        use_blueprint: {
+          path: 'irrigation_zone.yaml',
+          input: {
+            soil_sensor: soil,
+            valve_switch: valve,
+            moisture_threshold: parseInt(threshold),
+            watering_duration: 10,
+          }
+        }
+      });
+    } catch (e) {
+      // Automation creation failure is non-fatal — user can create in HA UI
+      console.warn('Could not auto-create automation (create manually in HA using the irrigation_zone blueprint):', e.message);
+    }
+
+    // Reset form
+    document.getElementById('zone-name').value = '';
+    document.getElementById('zone-soil').value = '';
+    document.getElementById('zone-valve').value = '';
+    document.getElementById('zone-threshold').value = '30';
+
+    // Reload
+    await Promise.all([loadZones(), loadDeviceOptions()]);
+  }
+
+  // ── Remove zone ───────────────────────────────────────────────────────
+
+  async function removeZone(id) {
+    if (!confirm(`Remove zone ${id}? This deletes the zone config. The HA automation must be deleted separately in HA Settings → Automations.`)) return;
+
+    const helpers = ['name', 'soil', 'valve', 'threshold'].map(k => `input_text.zone_${id}_${k}`);
+
+    try {
+      for (const entity of helpers) {
+        await haPost('/config/input_text/config/' + entity.replace('input_text.', ''), null);
+      }
+    } catch (e) {
+      alert('Error removing zone: ' + e.message);
+      return;
+    }
+
+    await loadZones();
+  }
+
+  // ── Utilities ─────────────────────────────────────────────────────────
+
+  function showError(msg) {
+    const el = document.getElementById('add-error');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────
+
+  async function init() {
+    await Promise.all([loadStatus(), loadZones(), loadDeviceOptions()]);
+    // Refresh every 30s
+    setInterval(() => Promise.all([loadStatus(), loadZones()]), 30_000);
+  }
+
+  init();
+</script>
+</body>
+</html>
