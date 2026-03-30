@@ -1,4 +1,5 @@
 # Global automations — these never need changing when adding new zones.
+# Includes: rain detection, battery alerts, and hourly LLM irrigation summary.
 
 - id: rain_detection
   alias: "Rain Detection"
@@ -49,4 +50,43 @@
           - {{ s.name }}: {{ s.state }}%
           {% endfor %}
         notification_id: low_battery_alert
+  mode: single
+
+- id: irrigation_llm_summary
+  alias: "Irrigation LLM Summary (Hourly)"
+  description: >
+    Runs every hour. Collects all zone states and sends them to the local
+    Ollama model (qwen2.5:1.5b) for a 2-3 sentence plain-English summary.
+    Result is stored in input_text.irrigation_summary and shown in admin UI.
+    On Intel N95: inference takes ~10-25 seconds, then CPU returns to idle.
+  trigger:
+    - platform: time_pattern
+      minutes: "0"
+  action:
+    - variables:
+        zone_context: >-
+          Rain detected: {{ states('input_boolean.rain_detected') }}.
+          {% for helper in states.input_text
+             | selectattr('entity_id', 'search', '^input_text\.zone_\d+_name$') %}
+          {% set zid = helper.entity_id | regex_replace('^input_text\.zone_(\d+)_name$', '\\1') %}
+          {% set soil_eid  = states('input_text.zone_' + zid + '_soil') %}
+          {% set valve_eid = states('input_text.zone_' + zid + '_valve') %}
+          Zone {{ zid }} "{{ helper.state }}":
+          moisture={{ states(soil_eid) if soil_eid else 'unknown' }}%,
+          valve={{ states(valve_eid) if valve_eid else 'unknown' }}.
+          {% endfor %}
+    - service: rest_command.ollama_summary
+      data:
+        prompt: >-
+          You are a concise irrigation assistant. In 2-3 sentences max, summarize
+          the current status and flag any issues (low battery, very dry soil,
+          valve left open, rain blocking watering).
+          System data: {{ zone_context }}
+      response_variable: llm_resp
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.irrigation_summary
+      data:
+        value: >-
+          {{ (llm_resp.content.response | default('No response from model.')) | truncate(255, True, '…') }}
   mode: single

@@ -1,10 +1,7 @@
 default_config:
 
-http:
-  use_x_forwarded_for: true
-  trusted_proxies:
-    - 172.16.0.0/12
-
+# HA OS: the Mosquitto broker addon listens on localhost:1883.
+# Credentials are managed via the Mosquitto addon → Logins section.
 mqtt:
   broker: localhost
   port: 1883
@@ -17,7 +14,7 @@ input_boolean:
     icon: mdi:weather-rainy
 
 # Zone config helpers — pre-seeded with zone 1.
-# Additional zones are created via the admin UI (http://host/admin).
+# Additional zones are created via the admin UI at http://HA:8123/local/admin.html
 input_text:
   zone_1_name:
     name: "Zone 1 Name"
@@ -31,5 +28,22 @@ input_text:
   zone_1_threshold:
     name: "Zone 1 Moisture Threshold"
     initial: "30"
+
+  # LLM irrigation summary — updated hourly by the Ollama automation
+  irrigation_summary:
+    name: "Irrigation Summary"
+    max: 255
+    initial: "Summary pending first hourly run..."
+
+# REST command for Ollama inference (used by the hourly summary automation).
+# Requires the Ollama addon to be running with qwen2.5:1.5b pulled.
+rest_command:
+  ollama_summary:
+    url: "http://localhost:11434/api/generate"
+    method: POST
+    content_type: "application/json"
+    payload: >-
+      {"model": "qwen2.5:1.5b", "prompt": "{{ prompt }}", "stream": false}
+    timeout: 120
 
 automation: !include automations.yaml
